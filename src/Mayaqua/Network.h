@@ -1,17 +1,17 @@
-// SoftEther VPN Source Code
+// SoftEther VPN Source Code - Developer Edition Master Branch
 // Mayaqua Kernel
 // 
 // SoftEther VPN Server, Client and Bridge are free software under GPLv2.
 // 
-// Copyright (c) 2012-2015 Daiyuu Nobori.
-// Copyright (c) 2012-2015 SoftEther VPN Project, University of Tsukuba, Japan.
-// Copyright (c) 2012-2015 SoftEther Corporation.
+// Copyright (c) Daiyuu Nobori.
+// Copyright (c) SoftEther VPN Project, University of Tsukuba, Japan.
+// Copyright (c) SoftEther Corporation.
 // 
 // All Rights Reserved.
 // 
 // http://www.softether.org/
 // 
-// Author: Daiyuu Nobori
+// Author: Daiyuu Nobori, Ph.D.
 // Comments: Tetsuo Sugiyama, Ph.D.
 // 
 // This program is free software; you can redistribute it and/or
@@ -153,6 +153,7 @@ struct DYN_VALUE
 #define	DEFAULT_GETIP_THREAD_MAX_NUM		64
 #endif	// USE_STRATEGY_LOW_MEMORY
 
+#define	DEFAULT_CIPHER_LIST			"ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20:ECDHE+AES256:DHE+AES256:RSA+AES"
 
 // SSL logging function
 //#define	ENABLE_SSL_LOGGING
@@ -246,6 +247,15 @@ struct SOCK_EVENT
 #define	SOCK_RUDP_LISTEN		5
 #define	SOCK_REVERSE_LISTEN		6
 
+// SSL Accept Settings
+struct SSL_ACCEPT_SETTINGS
+{
+	bool AcceptOnlyTls;
+	bool Tls_Disable1_0;
+	bool Tls_Disable1_1;
+	bool Tls_Disable1_2;
+};
+
 // Socket
 struct SOCK
 {
@@ -312,7 +322,7 @@ struct SOCK
 	IP Reverse_MyServerGlobalIp;	// Self global IP address when using the reverse socket
 	UINT Reverse_MyServerPort;		// Self port number when using the reverse socket
 	UCHAR Ssl_Init_Async_SendAlert[2];	// Initial state of SSL send_alert
-	bool AcceptOnlyTls;			// Accept only TLS (disable SSLv3)
+	SSL_ACCEPT_SETTINGS SslAcceptSettings;	// SSL Accept Settings
 	bool RawIP_HeaderIncludeFlag;
 
 #ifdef	ENABLE_SSL_LOGGING
@@ -599,6 +609,7 @@ struct UDPLISTENER
 	bool IsEspRawPortOpened;			// Whether the raw port opens
 	bool PollMyIpAndPort;				// Examine whether the global IP and the port number of its own
 	QUERYIPTHREAD *GetNatTIpThread;		// NAT-T IP address acquisition thread
+	IP ListenIP;						// Listen IP
 };
 
 #define	QUERYIPTHREAD_INTERVAL_LAST_OK	(3 * 60 * 60 * 1000)
@@ -751,8 +762,8 @@ struct RUDP_SESSION
 };
 
 // NAT Traversal Server Information
-#define	UDP_NAT_T_SERVER_TAG				"x%c.x%c.servers.nat-traversal.softether-network.net."
-#define	UDP_NAT_T_SERVER_TAG_ALT			"x%c.x%c.servers.nat-traversal.uxcom.jp."
+#define	UDP_NAT_T_SERVER_TAG				"x%c.x%c.dev.servers.nat-traversal.softether-network.net."
+#define	UDP_NAT_T_SERVER_TAG_ALT			"x%c.x%c.dev.servers.nat-traversal.uxcom.jp."
 #define	UDP_NAT_T_PORT						5004
 
 // Related to processing to get the IP address of the NAT-T server
@@ -811,7 +822,7 @@ typedef bool (RUDP_STACK_RPC_RECV_PROC)(RUDP_STACK *r, UDPPACKET *p);
 #define	RUDP_PROTOCOL_ICMP				1	// ICMP
 #define	RUDP_PROTOCOL_DNS				2	// DNS
 
-// Maximum time of continously changing of the NAT-T hostname
+// Maximum time of continuously changing of the NAT-T hostname
 #define	RUDP_NATT_MAX_CONT_CHANGE_HOSTNAME	30
 #define	RUDP_NATT_CONT_CHANGE_HOSTNAME_RESET_INTERVAL	(5 * 60 * 1000)
 
@@ -858,7 +869,7 @@ struct RUDP_STACK
 	UINT64 TotalPhysicalSent;			// Physical amount of data transmitted
 	UINT64 TotalLogicalSent;			// Logical amount of data transmitted
 	char CurrentRegisterHostname[MAX_SIZE];	// The host name of the the current destination of registration
-	UINT NumChangedHostname;			// How number of changing NAT-T hostname has occured continously
+	UINT NumChangedHostname;			// How number of changing NAT-T hostname has occured continuously
 	UINT64 NumChangedHostnameValueResetTick;
 
 	// NAT-T server related
@@ -882,7 +893,7 @@ struct RUDP_STACK
 	volatile UINT *NatTGlobalUdpPort;	// NAT-T global UDP port
 	UCHAR RandPortId;					// Random UDP port ID
 	bool NatT_EnableSourceIpValidation;	// Enable the source IP address validation mechanism
-	LIST *NatT_SourceIpList;			// Authenticated source IP adddress list
+	LIST *NatT_SourceIpList;			// Authenticated source IP address list
 
 	// For Client
 	bool TargetIpAndPortInited;			// The target IP address and the port number are initialized
@@ -1010,6 +1021,8 @@ int GetCurrentTimezone();
 bool GetSniNameFromSslPacket(UCHAR *packet_buf, UINT packet_size, char *sni, UINT sni_size);
 bool GetSniNameFromPreSslConnection(SOCK *s, char *sni, UINT sni_size);
 
+void SetDhParam(DH_CTX *dh);
+
 bool IsUseDnsProxy();
 bool IsUseAlternativeHostname();
 
@@ -1067,9 +1080,9 @@ void ConnectThreadForTcp(THREAD *thread, void *param);
 void ConnectThreadForRUDP(THREAD *thread, void *param);
 void ConnectThreadForOverDnsOrIcmp(THREAD *thread, void *param);
 SOCK *NewRUDPClientNatT(char *svc_name, IP *ip, UINT *error_code, UINT timeout, bool *cancel, char *hint_str, char *target_hostname);
-RUDP_STACK *NewRUDPServer(char *svc_name, RUDP_STACK_INTERRUPTS_PROC *proc_interrupts, RUDP_STACK_RPC_RECV_PROC *proc_rpc_recv, void *param, UINT port, bool no_natt_register, bool over_dns_mode, volatile UINT *natt_global_udp_port, UCHAR rand_port_id);
+RUDP_STACK *NewRUDPServer(char *svc_name, RUDP_STACK_INTERRUPTS_PROC *proc_interrupts, RUDP_STACK_RPC_RECV_PROC *proc_rpc_recv, void *param, UINT port, bool no_natt_register, bool over_dns_mode, volatile UINT *natt_global_udp_port, UCHAR rand_port_id, IP *listen_ip);
 SOCK *NewRUDPClientDirect(char *svc_name, IP *ip, UINT port, UINT *error_code, UINT timeout, bool *cancel, SOCK *sock, SOCK_EVENT *sock_event, UINT local_port, bool over_dns_mode);
-RUDP_STACK *NewRUDP(bool server_mode, char *svc_name, RUDP_STACK_INTERRUPTS_PROC *proc_interrupts, RUDP_STACK_RPC_RECV_PROC *proc_rpc_recv, void *param, UINT port, SOCK *sock, SOCK_EVENT *sock_event, bool server_no_natt_register, bool over_dns_mode, IP *client_target_ip, volatile UINT *natt_global_udp_port, UCHAR rand_port_id);
+RUDP_STACK *NewRUDP(bool server_mode, char *svc_name, RUDP_STACK_INTERRUPTS_PROC *proc_interrupts, RUDP_STACK_RPC_RECV_PROC *proc_rpc_recv, void *param, UINT port, SOCK *sock, SOCK_EVENT *sock_event, bool server_no_natt_register, bool over_dns_mode, IP *client_target_ip, volatile UINT *natt_global_udp_port, UCHAR rand_port_id, IP *listen_ip);
 void FreeRUDP(RUDP_STACK *r);
 void RUDPMainThread(THREAD *thread, void *param);
 void RUDPRecvProc(RUDP_STACK *r, UDPPACKET *p);
@@ -1096,7 +1109,7 @@ UINT64 RUDPGetCurrentSendingMinSeqNo(RUDP_SESSION *se);
 UINT64 RUDPGetCurrentSendingMaxSeqNo(RUDP_SESSION *se);
 SOCK *ListenRUDP(char *svc_name, RUDP_STACK_INTERRUPTS_PROC *proc_interrupts, RUDP_STACK_RPC_RECV_PROC *proc_rpc_recv, void *param, UINT port, bool no_natt_register, bool over_dns_mode);
 SOCK *ListenRUDPEx(char *svc_name, RUDP_STACK_INTERRUPTS_PROC *proc_interrupts, RUDP_STACK_RPC_RECV_PROC *proc_rpc_recv, void *param, UINT port, bool no_natt_register, bool over_dns_mode,
-				   volatile UINT *natt_global_udp_port, UCHAR rand_port_id);
+				   volatile UINT *natt_global_udp_port, UCHAR rand_port_id, IP *listen_ip);
 SOCK *AcceptRUDP(SOCK *s);
 void *InitWaitUntilHostIPAddressChanged();
 void FreeWaitUntilHostIPAddressChanged(void *p);
@@ -1275,6 +1288,7 @@ SOCK *Connect(char *hostname, UINT port);
 SOCK *ConnectEx(char *hostname, UINT port, UINT timeout);
 SOCK *ConnectEx2(char *hostname, UINT port, UINT timeout, bool *cancel_flag);
 SOCK *ConnectEx3(char *hostname, UINT port, UINT timeout, bool *cancel_flag, char *nat_t_svc_name, UINT *nat_t_error_code, bool try_start_ssl, bool ssl_no_tls, bool no_get_hostname);
+SOCK *ConnectEx4(char *hostname, UINT port, UINT timeout, bool *cancel_flag, char *nat_t_svc_name, UINT *nat_t_error_code, bool try_start_ssl, bool ssl_no_tls, bool no_get_hostname, IP *ret_ip);
 SOCKET ConnectTimeoutIPv4(IP *ip, UINT port, UINT timeout, bool *cancel_flag);
 void SetSocketSendRecvBufferSize(SOCKET s, UINT size);
 UINT GetSocketBufferSize(SOCKET s, bool send);
@@ -1286,7 +1300,7 @@ bool SetTtl(SOCK *sock, UINT ttl);
 void Disconnect(SOCK *sock);
 SOCK *Listen(UINT port);
 SOCK *ListenEx(UINT port, bool local_only);
-SOCK *ListenEx2(UINT port, bool local_only, bool enable_ca);
+SOCK *ListenEx2(UINT port, bool local_only, bool enable_ca, IP *listen_ip);
 SOCK *Listen6(UINT port);
 SOCK *ListenEx6(UINT port, bool local_only);
 SOCK *ListenEx62(UINT port, bool local_only, bool enable_ca);
@@ -1367,8 +1381,8 @@ bool GetDomainName(char *name, UINT size);
 bool UnixGetDomainName(char *name, UINT size);
 void RenewDhcp();
 void AcceptInit(SOCK *s);
+void AcceptInitEx(SOCK *s, bool no_lookup_hostname);
 void DisableGetHostNameWhenAcceptInit();
-bool CheckCipherListName(char *name);
 TOKEN_LIST *GetCipherList();
 COUNTER *GetNumTcpConnectionsCounter();
 void InitWaitThread();
@@ -1396,7 +1410,6 @@ void IntToSubnetMask4(IP *ip, UINT i);
 bool GetNetBiosName(char *name, UINT size, IP *ip);
 bool NormalizeMacAddress(char *dst, UINT size, char *src);
 SOCKLIST *NewSockList();
-void AddSockList(SOCKLIST *sl, SOCK *s);
 void DelSockList(SOCKLIST *sl, SOCK *s);
 void StopSockList(SOCKLIST *sl);
 void FreeSockList(SOCKLIST *sl);
@@ -1418,7 +1431,6 @@ void PrintTcpTableList(LIST *o);
 TCPTABLE *GetTcpTableFromEndPoint(LIST *o, IP *local_ip, UINT local_port, IP *remote_ip, UINT remote_port);
 UINT GetTcpProcessIdFromSocket(SOCK *s);
 UINT GetTcpProcessIdFromSocketReverse(SOCK *s);
-bool CanGetTcpProcessId();
 int connect_timeout(SOCKET s, struct sockaddr *addr, int size, int timeout, bool *cancel_flag);
 void EnableNetworkNameCache();
 void DisableNetworkNameCache();
@@ -1556,7 +1568,7 @@ void AddHostIPAddressToList(LIST *o, IP *ip);
 int CmpIpAddressList(void *p1, void *p2);
 UINT64 GetHostIPAddressListHash();
 
-UDPLISTENER *NewUdpListener(UDPLISTENER_RECV_PROC *recv_proc, void *param);
+UDPLISTENER *NewUdpListener(UDPLISTENER_RECV_PROC *recv_proc, void *param, IP *listen_ip);
 void UdpListenerThread(THREAD *thread, void *param);
 void UdpListenerGetPublicPortList(UDPLISTENER *u, char *dst, UINT size);
 void FreeUdpListener(UDPLISTENER *u);
@@ -1603,7 +1615,16 @@ void Win32WaitForTubes(TUBE **tubes, UINT num, UINT timeout);
 void UnixWaitForTubes(TUBE **tubes, UINT num, UINT timeout);
 #endif	// OS_WIN32
 
+#define PREVERIFY_ERR_MESSAGE_SIZE 100
+// Info on client certificate collected during TLS handshake
+struct SslClientCertInfo {
+	int PreverifyErr;
+	char PreverifyErrMessage[PREVERIFY_ERR_MESSAGE_SIZE];
+	X *X;
+};
+
 SSL_PIPE *NewSslPipe(bool server_mode, X *x, K *k, DH_CTX *dh);
+SSL_PIPE *NewSslPipeEx(bool server_mode, X *x, K *k, DH_CTX *dh, bool verify_peer, struct SslClientCertInfo *clientcert);
 void FreeSslPipe(SSL_PIPE *s);
 bool SyncSslPipe(SSL_PIPE *s);
 
@@ -1675,7 +1696,3 @@ UINT64 GetDynValueOrDefaultSafe(char *name, UINT64 default_value);
 
 #endif	// NETWORK_H
 
-
-// Developed by SoftEther VPN Project at University of Tsukuba in Japan.
-// Department of Computer Science has dozens of overly-enthusiastic geeks.
-// Join us: http://www.tsukuba.ac.jp/english/admission/

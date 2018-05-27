@@ -1,17 +1,17 @@
-// SoftEther VPN Source Code
+// SoftEther VPN Source Code - Developer Edition Master Branch
 // Cedar Communication Module
 // 
 // SoftEther VPN Server, Client and Bridge are free software under GPLv2.
 // 
-// Copyright (c) 2012-2015 Daiyuu Nobori.
-// Copyright (c) 2012-2015 SoftEther VPN Project, University of Tsukuba, Japan.
-// Copyright (c) 2012-2015 SoftEther Corporation.
+// Copyright (c) Daiyuu Nobori.
+// Copyright (c) SoftEther VPN Project, University of Tsukuba, Japan.
+// Copyright (c) SoftEther Corporation.
 // 
 // All Rights Reserved.
 // 
 // http://www.softether.org/
 // 
-// Author: Daiyuu Nobori
+// Author: Daiyuu Nobori, Ph.D.
 // Comments: Tetsuo Sugiyama, Ph.D.
 // 
 // This program is free software; you can redistribute it and/or
@@ -137,7 +137,7 @@ bool PeapClientSendMsChapv2AuthClientResponse(EAP_CLIENT *e, UCHAR *client_respo
 	msg1.Chap_Id = e->MsChapV2Challenge.Chap_Id;
 	msg1.Chap_Len = Endian16(54 + StrLen(e->Username));
 	msg1.Chap_ValueSize = 49;
-	Copy(msg1.Chap_PeerChallange, client_challenge, 16);
+	Copy(msg1.Chap_PeerChallenge, client_challenge, 16);
 	Copy(msg1.Chap_NtResponse, client_response, 24);
 	Copy(msg1.Chap_Name, e->Username, MIN(StrLen(e->Username), 255));
 
@@ -686,6 +686,11 @@ void EapSetRadiusGeneralAttributes(RADIUS_PACKET *r, EAP_CLIENT *e)
 	ui = Endian32(5);
 	Add(r->AvpList, NewRadiusAvp(RADIUS_ATTRIBUTE_NAS_PORT_TYPE, 0, 0, &ui, sizeof(UINT)));
 
+	if (IsEmptyStr(e->CalledStationStr) == false)
+	{
+		Add(r->AvpList, NewRadiusAvp(RADIUS_ATTRIBUTE_CALLED_STATION_ID, 0, 0, e->CalledStationStr, StrLen(e->CalledStationStr)));
+	}
+
 	Add(r->AvpList, NewRadiusAvp(RADIUS_ATTRIBUTE_CALLING_STATION_ID, 0, 0, e->ClientIpStr, StrLen(e->ClientIpStr)));
 
 	Add(r->AvpList, NewRadiusAvp(RADIUS_ATTRIBUTE_TUNNEL_CLIENT_ENDPOINT, 0, 0, e->ClientIpStr, StrLen(e->ClientIpStr)));
@@ -752,7 +757,7 @@ bool EapClientSendMsChapv2AuthClientResponse(EAP_CLIENT *e, UCHAR *client_respon
 	eap1->Chap_Id = e->MsChapV2Challenge.Chap_Id;
 	eap1->Chap_Len = Endian16(54 + StrLen(e->Username));
 	eap1->Chap_ValueSize = 49;
-	Copy(eap1->Chap_PeerChallange, client_challenge, 16);
+	Copy(eap1->Chap_PeerChallenge, client_challenge, 16);
 	Copy(eap1->Chap_NtResponse, client_response, 24);
 	Copy(eap1->Chap_Name, e->Username, MIN(StrLen(e->Username), 255));
 
@@ -1237,7 +1242,7 @@ bool EapSendPacket(EAP_CLIENT *e, RADIUS_PACKET *r)
 }
 
 // New EAP client
-EAP_CLIENT *NewEapClient(IP *server_ip, UINT server_port, char *shared_secret, UINT resend_timeout, UINT giveup_timeout, char *client_ip_str, char *username)
+EAP_CLIENT *NewEapClient(IP *server_ip, UINT server_port, char *shared_secret, UINT resend_timeout, UINT giveup_timeout, char *client_ip_str, char *username, char *hubname)
 {
 	EAP_CLIENT *e;
 	if (server_ip == NULL)
@@ -1266,6 +1271,7 @@ EAP_CLIENT *NewEapClient(IP *server_ip, UINT server_port, char *shared_secret, U
 	e->GiveupTimeout = giveup_timeout;
 	StrCpy(e->SharedSecret, sizeof(e->SharedSecret), shared_secret);
 
+	StrCpy(e->CalledStationStr, sizeof(e->CalledStationStr), hubname);
 	StrCpy(e->ClientIpStr, sizeof(e->ClientIpStr), client_ip_str);
 	StrCpy(e->Username, sizeof(e->Username), username);
 	e->LastRecvEapId = 0;
@@ -1703,7 +1709,7 @@ LABEL_ERROR:
 
 // Attempts Radius authentication (with specifying retry interval and multiple server)
 bool RadiusLogin(CONNECTION *c, char *server, UINT port, UCHAR *secret, UINT secret_size, wchar_t *username, char *password, UINT interval, UCHAR *mschap_v2_server_response_20,
-				 RADIUS_LOGIN_OPTION *opt)
+				 RADIUS_LOGIN_OPTION *opt, char *hubname)
 {
 	UCHAR random[MD5_SIZE];
 	UCHAR id;
@@ -1821,6 +1827,13 @@ bool RadiusLogin(CONNECTION *c, char *server, UINT port, UCHAR *secret, UINT sec
 		if (encrypted_password == NULL)
 		{
 			// Encryption failure
+
+			// Release the ip_list
+			for(i = 0; i < LIST_NUM(ip_list); i++)
+			{
+				IP *tmp_ip = LIST_DATA(ip_list, i);
+				Free(tmp_ip);
+			}
 			ReleaseList(ip_list);
 			return false;
 		}
@@ -1833,7 +1846,16 @@ bool RadiusLogin(CONNECTION *c, char *server, UINT port, UCHAR *secret, UINT sec
 	{
 		// Generate a password packet
 		BUF *user_password = (is_mschap ? NULL : RadiusCreateUserPassword(encrypted_password->Buf, encrypted_password->Size));
-		BUF *nas_id = RadiusCreateNasId(CEDAR_SERVER_STR);
+		BUF *nas_id;
+
+		if (IsEmptyStr(opt->NasId))
+		{
+			nas_id = RadiusCreateNasId(CEDAR_SERVER_STR);
+		}
+		else
+		{
+			nas_id = RadiusCreateNasId(opt->NasId);
+		}
 
 		if (is_mschap || user_password != NULL)
 		{
@@ -1880,6 +1902,12 @@ bool RadiusLogin(CONNECTION *c, char *server, UINT port, UCHAR *secret, UINT sec
 				// Tunnel-Medium-Type
 				ui = Endian32(1);
 				RadiusAddValue(p, 65, 0, 0, &ui, sizeof(ui));
+
+				// Called-Station-ID - VPN Hub Name
+				if (IsEmptyStr(hubname) == false)
+				{
+					RadiusAddValue(p, 30, 0, 0, hubname, StrLen(hubname));
+				}
 
 				// Calling-Station-Id
 				RadiusAddValue(p, 31, 0, 0, client_ip_str, StrLen(client_ip_str));
@@ -1930,6 +1958,12 @@ bool RadiusLogin(CONNECTION *c, char *server, UINT port, UCHAR *secret, UINT sec
 				// Tunnel-Medium-Type
 				ui = Endian32(1);
 				RadiusAddValue(p, 65, 0, 0, &ui, sizeof(ui));
+
+				// Called-Station-ID - VPN Hub Name
+				if (IsEmptyStr(hubname) == false)
+				{
+					RadiusAddValue(p, 30, 0, 0, hubname, StrLen(hubname));
+				}
 
 				// Calling-Station-Id
 				RadiusAddValue(p, 31, 0, 0, client_ip_str, StrLen(client_ip_str));
@@ -2385,7 +2419,3 @@ BUF *RadiusEncryptPassword(char *password, UCHAR *random, UCHAR *secret, UINT se
 	return buf;
 }
 
-
-// Developed by SoftEther VPN Project at University of Tsukuba in Japan.
-// Department of Computer Science has dozens of overly-enthusiastic geeks.
-// Join us: http://www.tsukuba.ac.jp/english/admission/

@@ -1,17 +1,17 @@
-// SoftEther VPN Source Code
+// SoftEther VPN Source Code - Developer Edition Master Branch
 // Mayaqua Kernel
 // 
 // SoftEther VPN Server, Client and Bridge are free software under GPLv2.
 // 
-// Copyright (c) 2012-2015 Daiyuu Nobori.
-// Copyright (c) 2012-2015 SoftEther VPN Project, University of Tsukuba, Japan.
-// Copyright (c) 2012-2015 SoftEther Corporation.
+// Copyright (c) Daiyuu Nobori.
+// Copyright (c) SoftEther VPN Project, University of Tsukuba, Japan.
+// Copyright (c) SoftEther Corporation.
 // 
 // All Rights Reserved.
 // 
 // http://www.softether.org/
 // 
-// Author: Daiyuu Nobori
+// Author: Daiyuu Nobori, Ph.D.
 // Comments: Tetsuo Sugiyama, Ph.D.
 // 
 // This program is free software; you can redistribute it and/or
@@ -160,6 +160,7 @@ struct FIFO
 	UINT pos, size, memsize;
 	UINT64 total_read_size;
 	UINT64 total_write_size;
+	bool fixed;
 };
 
 // List
@@ -264,7 +265,7 @@ UINT PRandInt(PRAND *p);
 
 LIST *NewCandidateList();
 void FreeCandidateList(LIST *o);
-int ComapreCandidate(void *p1, void *p2);
+int CompareCandidate(void *p1, void *p2);
 void AddCandidate(LIST *o, wchar_t *str, UINT num_max);
 BUF *CandidateToBuf(LIST *o);
 LIST *BufToCandidate(BUF *b);
@@ -283,6 +284,7 @@ void *InternalReAlloc(void *addr, UINT size);
 void InternalFree(void *addr);
 
 void Copy(void *dst, void *src, UINT size);
+void Move(void *dst, void *src, UINT size);
 int Cmp(void *p1, void *p2, UINT size);
 int CmpCaseIgnore(void *p1, void *p2, UINT size);
 void ZeroMem(void *addr, UINT size);
@@ -356,6 +358,8 @@ void ShrinkFifoMemory(FIFO *f);
 UCHAR *GetFifoPointer(FIFO *f);
 UCHAR *FifoPtr(FIFO *f);
 void WriteFifo(FIFO *f, void *p, UINT size);
+void WriteFifoFront(FIFO *f, void *p, UINT size);
+void PadFifoFront(FIFO *f, UINT size);
 void ClearFifo(FIFO *f);
 UINT FifoSize(FIFO *f);
 void LockFifo(FIFO *f);
@@ -365,6 +369,7 @@ void CleanupFifo(FIFO *f);
 FIFO *NewFifo();
 FIFO *NewFifoFast();
 FIFO *NewFifoEx(bool fast);
+FIFO *NewFifoEx2(bool fast, bool fixed);
 void InitFifo();
 UINT GetFifoCurrentReallocMemSize();
 void SetFifoCurrentReallocMemSize(UINT size);
@@ -475,7 +480,3 @@ void AppendBufStr(BUF *b, char *str);
 
 #endif	// MEMORY_H
 
-
-// Developed by SoftEther VPN Project at University of Tsukuba in Japan.
-// Department of Computer Science has dozens of overly-enthusiastic geeks.
-// Join us: http://www.tsukuba.ac.jp/english/admission/

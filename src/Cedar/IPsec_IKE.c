@@ -1,17 +1,17 @@
-// SoftEther VPN Source Code
+// SoftEther VPN Source Code - Developer Edition Master Branch
 // Cedar Communication Module
 // 
 // SoftEther VPN Server, Client and Bridge are free software under GPLv2.
 // 
-// Copyright (c) 2012-2015 Daiyuu Nobori.
-// Copyright (c) 2012-2015 SoftEther VPN Project, University of Tsukuba, Japan.
-// Copyright (c) 2012-2015 SoftEther Corporation.
+// Copyright (c) Daiyuu Nobori.
+// Copyright (c) SoftEther VPN Project, University of Tsukuba, Japan.
+// Copyright (c) SoftEther Corporation.
 // 
 // All Rights Reserved.
 // 
 // http://www.softether.org/
 // 
-// Author: Daiyuu Nobori
+// Author: Daiyuu Nobori, Ph.D.
 // Comments: Tetsuo Sugiyama, Ph.D.
 // 
 // This program is free software; you can redistribute it and/or
@@ -206,7 +206,7 @@ void IPsecSendPacketByIPsecSa(IKE_SERVER *ike, IPSECSA *sa, UCHAR *data, UINT da
 				IPV4_SET_HEADER_LEN(&h, sizeof(IPV4_HEADER) / 4);
 				h.TotalLength = Endian16((USHORT)(data_size + sizeof(IPV4_HEADER)));
 				h.Identification = Endian16(c->TunnelSendIpId++);
-				h.FlagsAndFlagmentOffset[0] = h.FlagsAndFlagmentOffset[1] = 0;
+				h.FlagsAndFragmentOffset[0] = h.FlagsAndFragmentOffset[1] = 0;
 				h.TimeToLive = DEFAULT_IP_TTL;
 				h.Protocol = protocol_id;
 				h.SrcIP = IPToUINT(&c->TunnelModeServerIP);
@@ -2839,7 +2839,7 @@ void ProcIkeAggressiveModePacketRecv(IKE_SERVER *ike, UDPPACKET *p, IKE_PACKET *
 
 			if ((caps.NatTraversalDraftIetf || caps.NatTraversalRfc3947) || (IsUdpPortOpened(ike->IPsec->UdpListener, &p->DstIP, IPSEC_PORT_IPSEC_ESP_RAW)))
 			{
-				sa = FindIkeSaByEndPointAndInitiatorCookie(ike, &p->DstIP, p->DestPort, &p->SrcIP, p->SrcPort, header->InitiatorCookie, IKE_SA_AGRESSIVE_MODE);
+				sa = FindIkeSaByEndPointAndInitiatorCookie(ike, &p->DstIP, p->DestPort, &p->SrcIP, p->SrcPort, header->InitiatorCookie, IKE_SA_AGGRESSIVE_MODE);
 
 				if (sa == NULL)
 				{
@@ -2894,7 +2894,7 @@ void ProcIkeAggressiveModePacketRecv(IKE_SERVER *ike, UDPPACKET *p, IKE_PACKET *
 								IKE_PACKET_PAYLOAD *your_nat_d_2 = NULL;
 
 								// Create an IKE SA
-								sa = NewIkeSa(ike, c, header->InitiatorCookie, IKE_SA_AGRESSIVE_MODE, &setting);
+								sa = NewIkeSa(ike, c, header->InitiatorCookie, IKE_SA_AGGRESSIVE_MODE, &setting);
 								Copy(&sa->Caps, &caps, sizeof(IKE_CAPS));
 								sa->State= IKE_SA_AM_STATE_1_SA;
 								Insert(ike->IkeSaList, sa);
@@ -3118,7 +3118,7 @@ void ProcIkeAggressiveModePacketRecv(IKE_SERVER *ike, UDPPACKET *p, IKE_PACKET *
 				header->ResponderCookie), true, header->InitiatorCookie, header->ResponderCookie);
 		}
 
-		if (sa != NULL && sa->Mode == IKE_SA_AGRESSIVE_MODE)
+		if (sa != NULL && sa->Mode == IKE_SA_AGGRESSIVE_MODE)
 		{
 			IKE_PACKET *pr = NULL;
 
@@ -4725,6 +4725,8 @@ bool GetBestTransformSettingForIPsecSa(IKE_SERVER *ike, IKE_PACKET *pr, IPSEC_SA
 						IKE_PACKET_TRANSFORM_PAYLOAD *transform = &transform_payload->Payload.Transform;
 						IPSEC_SA_TRANSFORM_SETTING set;
 
+						Zero(&set, sizeof(set));
+
 						if (TransformPayloadToTransformSettingForIPsecSa(ike, transform, &set, server_ip))
 						{
 							Copy(setting, &set, sizeof(IPSEC_SA_TRANSFORM_SETTING));
@@ -5755,7 +5757,7 @@ void ProcessIKEInterrupts(IKE_SERVER *ike)
 	while (ike->StateHasChanged);
 
 	// Maintenance of the thread list
-	MainteThreadList(ike->ThreadList);
+	MaintainThreadList(ike->ThreadList);
 	/*Debug("ike->ThreadList: %u\n", LIST_NUM(ike->ThreadList));
 	{
 		UINT i;
@@ -5985,7 +5987,3 @@ IKE_SERVER *NewIKEServer(CEDAR *cedar, IPSEC_SERVER *ipsec)
 
 
 
-
-// Developed by SoftEther VPN Project at University of Tsukuba in Japan.
-// Department of Computer Science has dozens of overly-enthusiastic geeks.
-// Join us: http://www.tsukuba.ac.jp/english/admission/

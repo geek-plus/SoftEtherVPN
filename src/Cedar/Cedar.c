@@ -1,17 +1,17 @@
-// SoftEther VPN Source Code
+// SoftEther VPN Source Code - Developer Edition Master Branch
 // Cedar Communication Module
 // 
 // SoftEther VPN Server, Client and Bridge are free software under GPLv2.
 // 
-// Copyright (c) 2012-2015 Daiyuu Nobori.
-// Copyright (c) 2012-2015 SoftEther VPN Project, University of Tsukuba, Japan.
-// Copyright (c) 2012-2015 SoftEther Corporation.
+// Copyright (c) Daiyuu Nobori.
+// Copyright (c) SoftEther VPN Project, University of Tsukuba, Japan.
+// Copyright (c) SoftEther Corporation.
 // 
 // All Rights Reserved.
 // 
 // http://www.softether.org/
 // 
-// Author: Daiyuu Nobori
+// Author: Daiyuu Nobori, Ph.D.
 // Comments: Tetsuo Sugiyama, Ph.D.
 // 
 // This program is free software; you can redistribute it and/or
@@ -268,6 +268,15 @@ bool IsSupportedWinVer(RPC_WINVER *v)
 		if (v->IsServer == false)
 		{
 			// Windows 10 (not Windows Server 2016)
+			if (v->ServicePack <= 0)
+			{
+				// SP0 only
+				return true;
+			}
+		}
+		else
+		{
+			// Windows Server 2016
 			if (v->ServicePack <= 0)
 			{
 				// SP0 only
@@ -560,42 +569,6 @@ void FreeNoSslList(CEDAR *c)
 
 	ReleaseList(c->NonSslList);
 	c->NonSslList = NULL;
-}
-
-// Write a message into Cedar log
-void CedarLog(char *str)
-{
-	char *tmp;
-	// Validate arguments
-	if (str == NULL)
-	{
-		return;
-	}
-	if (cedar_log_ref == NULL)
-	{
-		return;
-	}
-
-	tmp = CopyStr(str);
-
-	if (StrLen(tmp) > 1)
-	{
-		if (tmp[StrLen(tmp) - 1] == '\n')
-		{
-			tmp[StrLen(tmp) - 1] = 0;
-		}
-		if (StrLen(tmp) > 1)
-		{
-			if (tmp[StrLen(tmp) - 1] == '\r')
-			{
-				tmp[StrLen(tmp) - 1] = 0;
-			}
-		}
-	}
-
-	InsertStringRecord(cedar_log, tmp);
-
-	Free(tmp);
 }
 
 // Start Cedar log
@@ -1750,11 +1723,13 @@ CEDAR *NewCedar(X *server_x, K *server_k)
 
 	c->TrafficDiffList = NewList(NULL);
 
-	SetCedarCipherList(c, "RC4-MD5");
+	SetCedarCipherList(c, SERVER_DEFAULT_CIPHER_NAME);
 
 	c->ClientId = _II("CLIENT_ID");
 
 	c->UdpPortList = NewIntList(false);
+
+	c->DhParamBits = DH_PARAM_BITS_DEFAULT;
 
 	InitNetSvcList(c);
 
@@ -1905,7 +1880,3 @@ void FreeCedar()
 	FreeProtocol();
 }
 
-
-// Developed by SoftEther VPN Project at University of Tsukuba in Japan.
-// Department of Computer Science has dozens of overly-enthusiastic geeks.
-// Join us: http://www.tsukuba.ac.jp/english/admission/

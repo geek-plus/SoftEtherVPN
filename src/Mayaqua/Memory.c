@@ -1,17 +1,17 @@
-// SoftEther VPN Source Code
+// SoftEther VPN Source Code - Developer Edition Master Branch
 // Mayaqua Kernel
 // 
 // SoftEther VPN Server, Client and Bridge are free software under GPLv2.
 // 
-// Copyright (c) 2012-2015 Daiyuu Nobori.
-// Copyright (c) 2012-2015 SoftEther VPN Project, University of Tsukuba, Japan.
-// Copyright (c) 2012-2015 SoftEther Corporation.
+// Copyright (c) Daiyuu Nobori.
+// Copyright (c) SoftEther VPN Project, University of Tsukuba, Japan.
+// Copyright (c) SoftEther Corporation.
 // 
 // All Rights Reserved.
 // 
 // http://www.softether.org/
 // 
-// Author: Daiyuu Nobori
+// Author: Daiyuu Nobori, Ph.D.
 // Comments: Tetsuo Sugiyama, Ph.D.
 // 
 // This program is free software; you can redistribute it and/or
@@ -778,7 +778,7 @@ void AddCandidate(LIST *o, wchar_t *str, UINT num_max)
 }
 
 // Comparison of candidates
-int ComapreCandidate(void *p1, void *p2)
+int CompareCandidate(void *p1, void *p2)
 {
 	CANDIDATE *c1, *c2;
 	if (p1 == NULL || p2 == NULL)
@@ -828,7 +828,7 @@ void FreeCandidateList(LIST *o)
 // Creating a new candidate list
 LIST *NewCandidateList()
 {
-	return NewList(ComapreCandidate);
+	return NewList(CompareCandidate);
 }
 
 // Fill a range of memory
@@ -1968,7 +1968,7 @@ bool IsInt64InList(LIST *o, UINT64 i)
 	return false;
 }
 
-// Remove all int from the interger list
+// Remove all int from the integer list
 void DelAllInt(LIST *o)
 {
 	UINT i;
@@ -2478,9 +2478,12 @@ UINT ReadFifo(FIFO *f, void *p, UINT size)
 
 	f->total_read_size += (UINT64)read_size;
 
-	if (f->size == 0)
+	if (f->fixed == false)
 	{
-		f->pos = 0;
+		if (f->size == 0)
+		{
+			f->pos = 0;
+		}
 	}
 
 	ShrinkFifoMemory(f);
@@ -2496,6 +2499,11 @@ void ShrinkFifoMemory(FIFO *f)
 {
 	// Validate arguments
 	if (f == NULL)
+	{
+		return;
+	}
+
+	if (f->fixed)
 	{
 		return;
 	}
@@ -2518,6 +2526,25 @@ void ShrinkFifoMemory(FIFO *f)
 		f->p = new_p;
 		f->pos = 0;
 	}
+}
+
+// Write data to the front of FIFO
+void WriteFifoFront(FIFO *f, void *p, UINT size)
+{
+	// Validate arguments
+	if (f == NULL || size == 0)
+	{
+		return;
+	}
+
+	if (f->pos < size)
+	{
+		PadFifoFront(f, size - f->pos);
+	}
+
+	Copy(((UCHAR *)f->p) + (f->pos - size), p, size);
+	f->pos -= size;
+	f->size += size;
 }
 
 // Write to the FIFO
@@ -2558,6 +2585,20 @@ void WriteFifo(FIFO *f, void *p, UINT size)
 
 	// KS
 	KS_INC(KS_WRITE_FIFO_COUNT);
+}
+
+// Add a padding before the head of fifo
+void PadFifoFront(FIFO *f, UINT size)
+{
+	// Validate arguments
+	if (f == NULL || size == 0)
+	{
+		return;
+	}
+
+	f->memsize += size;
+
+	f->p = ReAlloc(f->p, f->memsize);
 }
 
 // Clear the FIFO
@@ -2679,6 +2720,10 @@ FIFO *NewFifoFast()
 }
 FIFO *NewFifoEx(bool fast)
 {
+	return NewFifoEx2(fast, false);
+}
+FIFO *NewFifoEx2(bool fast, bool fixed)
+{
 	FIFO *f;
 
 	// Memory allocation
@@ -2698,6 +2743,7 @@ FIFO *NewFifoEx(bool fast)
 	f->size = f->pos = 0;
 	f->memsize = FIFO_INIT_MEM_SIZE;
 	f->p = Malloc(FIFO_INIT_MEM_SIZE);
+	f->fixed = false;
 
 #ifndef	DONT_USE_KERNEL_STATUS
 //	TrackNewObj(POINTER_TO_UINT64(f), "FIFO", 0);
@@ -4267,6 +4313,21 @@ void Copy(void *dst, void *src, UINT size)
 	memcpy(dst, src, size);
 }
 
+// Memory move
+void Move(void *dst, void *src, UINT size)
+{
+	// Validate arguments
+	if (dst == NULL || src == NULL || size == 0 || dst == src)
+	{
+		return;
+	}
+
+	// KS
+	KS_INC(KS_COPY_COUNT);
+
+	memmove(dst, src, size);
+}
+
 // Memory comparison
 int Cmp(void *p1, void *p2, UINT size)
 {
@@ -4381,7 +4442,3 @@ void XorData(void *dst, void *src1, void *src2, UINT size)
 		c2++;
 	}
 }
-
-// Developed by SoftEther VPN Project at University of Tsukuba in Japan.
-// Department of Computer Science has dozens of overly-enthusiastic geeks.
-// Join us: http://www.tsukuba.ac.jp/english/admission/

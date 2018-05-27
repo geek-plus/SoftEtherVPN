@@ -1,17 +1,17 @@
-// SoftEther VPN Source Code
+// SoftEther VPN Source Code - Developer Edition Master Branch
 // Mayaqua Kernel
 // 
 // SoftEther VPN Server, Client and Bridge are free software under GPLv2.
 // 
-// Copyright (c) 2012-2015 Daiyuu Nobori.
-// Copyright (c) 2012-2015 SoftEther VPN Project, University of Tsukuba, Japan.
-// Copyright (c) 2012-2015 SoftEther Corporation.
+// Copyright (c) Daiyuu Nobori.
+// Copyright (c) SoftEther VPN Project, University of Tsukuba, Japan.
+// Copyright (c) SoftEther Corporation.
 // 
 // All Rights Reserved.
 // 
 // http://www.softether.org/
 // 
-// Author: Daiyuu Nobori
+// Author: Daiyuu Nobori, Ph.D.
 // Comments: Tetsuo Sugiyama, Ph.D.
 // 
 // This program is free software; you can redistribute it and/or
@@ -204,6 +204,7 @@ static SERVICE_FUNCTION *g_start, *g_stop;
 static bool exiting = false;
 static bool wnd_end;
 static bool is_usermode = false;
+static bool wts_is_locked_flag = false;
 static HICON tray_icon;
 static NOTIFYICONDATA nid;
 static NOTIFYICONDATAW nid_nt;
@@ -271,6 +272,43 @@ typedef struct MS_MSCHAPV2_PARAMS
 	UCHAR ClientResponse24[24];
 	UCHAR ResponseBuffer[MAX_SIZE];
 } MS_MSCHAPV2_PARAMS;
+
+// The function which should be called once as soon as possible after the process is started
+void MsInitProcessCallOnce()
+{
+	// Mitigate the DLL injection attack
+	char system_dir[MAX_PATH];
+	char kernel32_path[MAX_PATH];
+	UINT len;
+	HINSTANCE hKernel32;
+
+	// Get the full path of kernel32.dll
+	memset(system_dir, 0, sizeof(system_dir));
+	GetSystemDirectory(system_dir, sizeof(system_dir));
+	len = lstrlenA(system_dir);
+	if (system_dir[len] == '\\')
+	{
+		system_dir[len] = 0;
+	}
+	wsprintfA(kernel32_path, "%s\\kernel32.dll", system_dir);
+
+	// Load kernel32.dll
+	hKernel32 = LoadLibraryA(kernel32_path);
+	if (hKernel32 != NULL)
+	{
+		BOOL (WINAPI *_SetDllDirectoryA)(LPCTSTR);
+
+		_SetDllDirectoryA = (BOOL (WINAPI *)(LPCTSTR))
+			GetProcAddress(hKernel32, "SetDllDirectoryA");
+
+		if (_SetDllDirectoryA != NULL)
+		{
+			_SetDllDirectoryA("");
+		}
+
+		FreeLibrary(hKernel32);
+	}
+}
 
 // Collect the information of the VPN software
 bool MsCollectVpnInfo(BUF *bat, char *tmpdir, char *svc_name, wchar_t *config_name, wchar_t *logdir_name)
@@ -3975,7 +4013,7 @@ void *MsLoadLibraryAsDataFile(char *name)
 	return MsLoadLibraryAsDataFileW(name_w);
 }
 
-// Simple LoadLibaray
+// Simple LoadLibrary
 void *MsLoadLibraryRawW(wchar_t *name)
 {
 	// Validate arguments
@@ -6601,7 +6639,7 @@ UINT MsService(char *name, SERVICE_FUNCTION *start, SERVICE_FUNCTION *stop, UINT
 			mode == SVC_MODE_STOP || mode == SVC_MODE_SERVICE) &&
 			(ms->IsAdmin == false))
 		{
-			// Do not have Administrators privillage
+			// Do not have Administrators privilege
 			MsgBox(NULL, MB_ICONEXCLAMATION, _UU("SVC_NOT_ADMIN"));
 		}
 		else
@@ -6969,7 +7007,7 @@ UINT MsService(char *name, SERVICE_FUNCTION *start, SERVICE_FUNCTION *stop, UINT
 
 			case SVC_MODE_SERVICE:
 				// Run as a service
-				// Obsolated (2012.12.31) (Do this in the above code)
+				// Obsoleted (2012.12.31) (Do this in the above code)
 				//MsServiceMode(start, stop);
 				break;
 
@@ -7345,7 +7383,7 @@ bool MsIsRemoteDesktopEnabled()
 }
 
 // Examine whether the remote desktop becomes available by registry operation
-bool MsIsRemoteDesktopCanEnableByRegistory()
+bool MsIsRemoteDesktopCanEnableByRegistry()
 {
 	OS_INFO *info = GetOsInfo();
 	if (MsIsRemoteDesktopAvailable() == false)
@@ -8393,19 +8431,11 @@ bool MsUpgradeVLan(char *tag_name, char *connection_tag_name, char *instance_nam
 }
 bool MsUpgradeVLanWithoutLock(char *tag_name, char *connection_tag_name, char *instance_name, MS_DRIVER_VER *ver)
 {
-	wchar_t infpath[MAX_PATH];
 	char hwid[MAX_PATH];
 	wchar_t hwid_w[MAX_PATH];
 	bool ret = false;
-	bool need_reboot;
-	bool before_status;
 	UCHAR old_mac_address[6];
-	UCHAR new_mac_address[6];
 	char *s;
-	NO_WARNING *nw;
-	char neo_sys[MAX_PATH];
-	char *reg_key;
-	UINT i;
 	// Validate arguments
 	if (instance_name == NULL || tag_name == NULL || connection_tag_name == NULL || ver == NULL)
 	{
@@ -8439,38 +8469,6 @@ bool MsUpgradeVLanWithoutLock(char *tag_name, char *connection_tag_name, char *i
 		return false;
 	}
 
-	reg_key = MsGetNetCfgRegKeyName(tag_name, instance_name);
-
-	if (IsEmptyStr(reg_key) == false)
-	{
-		// Add a value to the registry key
-		MsRegWriteInt(REG_LOCAL_MACHINE, reg_key, "*IfType", 6);
-		MsRegWriteInt(REG_LOCAL_MACHINE, reg_key, "*MediaType", 0);
-		MsRegWriteInt(REG_LOCAL_MACHINE, reg_key, "*PhysicalMediaType", 0);
-	}
-	Free(reg_key);
-
-	// Get the .sys file name that is currently being used
-	if (MsGetNeoDeiverFilename(neo_sys, sizeof(neo_sys), instance_name) == false)
-	{
-		if (MsIsInfCatalogRequired())
-		{
-			// Can not be upgraded if getting current .sys file name failed
-			// in the Windows 8 or later
-			return false;
-		}
-
-		// Create a new file name because it is unknown
-		if (MsMakeNewNeoDriverFilename(neo_sys, sizeof(neo_sys)) == false)
-		{
-			// Failure
-			return false;
-		}
-	}
-
-	// Get the current operating status
-	before_status = MsIsVLanEnabled(instance_name);
-
 	// Get the previous MAC address
 	s = MsGetMacAddress(tag_name, instance_name);
 	if (s == NULL)
@@ -8495,57 +8493,9 @@ bool MsUpgradeVLanWithoutLock(char *tag_name, char *connection_tag_name, char *i
 		FreeBuf(b);
 	}
 
-	// Starting the installation
-	if (MsStartDriverInstall(instance_name, IsZero(old_mac_address, 6) ? NULL : old_mac_address, neo_sys,
-		new_mac_address, ver) == false)
-	{
-		return false;
-	}
-	MsGetDriverPath(instance_name, NULL, NULL, infpath, NULL, NULL, NULL, neo_sys);
+	ret = MsUninstallVLanWithoutLock(instance_name);
 
-	nw = NULL;
-
-	//if (MsIsVista() == false)
-	{
-		nw = MsInitNoWarning();
-	}
-
-	// Do the installation
-	if (ms->nt->UpdateDriverForPlugAndPlayDevicesW(
-		NULL, hwid_w, infpath, 1, &need_reboot))
-	{
-		ret = true;
-	}
-	MsFreeNoWarning(nw);
-
-	// Installation complete
-	MsFinishDriverInstall(instance_name, neo_sys);
-
-	for (i = 0;i < 5;i++)
-	{
-		MsInitNetworkConfig(tag_name, instance_name, connection_tag_name);
-		if (MsIsInfCatalogRequired())
-		{
-			// Write the MAC address
-			char mac_address_str[MAX_SIZE];
-			BinToStr(mac_address_str, sizeof(mac_address_str), new_mac_address, sizeof(new_mac_address));
-			MsSetMacAddress(VLAN_ADAPTER_NAME_TAG, instance_name, mac_address_str);
-		}
-
-		SleepThread(MsIsVista() ? 1000 : 300);
-	}
-
-	SleepThread(MsIsVista() ? 1000 : 300);
-
-	// Restore operation
-	if (before_status)
-	{
-		MsEnableVLan(instance_name);
-	}
-	else
-	{
-		MsDisableVLan(instance_name);
-	}
+	ret = MsInstallVLanWithoutLock(tag_name, connection_tag_name, instance_name, ver);
 
 	return ret;
 }
@@ -8774,6 +8724,7 @@ BOOL CALLBACK EnumChildWindowProc(HWND hWnd, LPARAM lParam)
 	LIST *o;
 	HWND hParent;
 	char c1[MAX_SIZE], c2[MAX_SIZE];
+	bool ok = false;
 	// Validate arguments
 	if (hWnd == NULL || p == NULL)
 	{
@@ -8795,6 +8746,19 @@ BOOL CALLBACK EnumChildWindowProc(HWND hWnd, LPARAM lParam)
 	}
 
 	if (p->include_ipcontrol || (StrCmpi(c1, "SysIPAddress32") != 0 && (IsEmptyStr(c2) || StrCmpi(c2, "SysIPAddress32") != 0)))
+	{
+		ok = true;
+	}
+
+	if (MsIsWine())
+	{
+		if (StrCmpi(c1, "SysIPAddress32") == 0 || StrCmpi(c2, "SysIPAddress32") == 0)
+		{
+			ok = true;
+		}
+	}
+
+	if (ok)
 	{
 		AddWindow(o, hWnd);
 
@@ -9179,6 +9143,11 @@ bool MsCloseWarningWindow(NO_WARNING *nw, UINT thread_id)
 	for (i = 0;i < LIST_NUM(o);i++)
 	{
 		HWND hWnd;
+
+		if (nw->Halt)
+		{
+			break;
+		}
 		
 		if (MsIsVista() == false)
 		{
@@ -10489,12 +10458,12 @@ void MsGenMacAddress(UCHAR *mac)
 
 	Hash(hash, hash_src, sizeof(hash_src), true);
 
-	mac[0] = 0x00;
-	mac[1] = 0xAC;
-	mac[2] = hash[0];
-	mac[3] = hash[1];
-	mac[4] = hash[2];
-	mac[5] = hash[3];
+	mac[0] = 0x5E;
+	mac[1] = hash[0];
+	mac[2] = hash[1];
+	mac[3] = hash[2];
+	mac[4] = hash[3];
+	mac[5] = hash[4];
 }
 
 // Finish the driver installation
@@ -11994,7 +11963,7 @@ TOKEN_LIST *MsEnumNeoDriverFilenames()
 	for (i = 0;i < neos->NumTokens;i++)
 	{
 		char filename[MAX_PATH];
-		if (MsGetNeoDeiverFilename(filename, sizeof(filename), neos->Token[i]))
+		if (MsGetNeoDriverFilename(filename, sizeof(filename), neos->Token[i]))
 		{
 			Add(o, CopyStr(filename));
 		}
@@ -12009,7 +11978,7 @@ TOKEN_LIST *MsEnumNeoDriverFilenames()
 }
 
 // Get the driver file name of Neo
-bool MsGetNeoDeiverFilename(char *name, UINT size, char *instance_name)
+bool MsGetNeoDriverFilename(char *name, UINT size, char *instance_name)
 {
 	char tmp[MAX_SIZE];
 	char *ret;
@@ -12327,6 +12296,175 @@ bool MsIsPasswordEmpty(wchar_t *username)
 	return false;
 }
 
+// Determine if the workstation is locked by using WTS API
+bool MsDetermineIsLockedByWtsApi()
+{
+	return wts_is_locked_flag;
+}
+
+// IsLocked Window Proc
+LRESULT CALLBACK MsIsLockedWindowHandlerWindowProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	MS_ISLOCKED *d = NULL;
+	CREATESTRUCT *cs;
+	// Validate arguments
+	if (hWnd == NULL)
+	{
+		return 0;
+	}
+
+	d = (MS_ISLOCKED *)GetWindowLongPtrA(hWnd, GWLP_USERDATA);
+	if (d == NULL && msg != WM_CREATE)
+	{
+		goto LABEL_END;
+	}
+
+	switch (msg)
+	{
+	case WM_CREATE:
+		cs = (CREATESTRUCT *)lParam;
+		d = (MS_ISLOCKED *)cs->lpCreateParams;
+		SetWindowLongPtrA(hWnd, GWLP_USERDATA, (LONG_PTR)d);
+
+		ms->nt->WTSRegisterSessionNotification(hWnd, NOTIFY_FOR_THIS_SESSION);
+
+		wts_is_locked_flag = false;
+
+		break;
+
+	case WM_WTSSESSION_CHANGE:
+		{
+			char tmp[MAX_SIZE];
+
+			GetDateTimeStr64(tmp, sizeof(tmp), LocalTime64());
+
+			switch (wParam)
+			{
+			case WTS_SESSION_LOCK:
+				Debug("%s: Enter Lock\n", tmp);
+				d->IsLockedFlag = true;
+				wts_is_locked_flag = true;
+				break;
+
+			case WTS_SESSION_UNLOCK:
+				Debug("%s: Enter Unlock\n", tmp);
+				d->IsLockedFlag = false;
+				wts_is_locked_flag = false;
+				break;
+			}
+		}
+
+		break;
+
+	case WM_DESTROY:
+		Debug("Unregister\n");
+		ms->nt->WTSUnRegisterSessionNotification(hWnd);
+		PostQuitMessage(0);
+		break;
+	}
+
+LABEL_END:
+	return DefWindowProc(hWnd, msg, wParam, lParam);
+}
+
+// IsLocked thread proc
+void MsIsLockedThreadProc(THREAD *thread, void *param)
+{
+	MS_ISLOCKED *d = (MS_ISLOCKED *)param;
+	char wndclass_name[MAX_PATH];
+	WNDCLASS wc;
+	HWND hWnd;
+	MSG msg;
+	// Validate arguments
+	if (d == NULL || thread == NULL)
+	{
+		return;
+	}
+
+	Format(wndclass_name, sizeof(wndclass_name), "WNDCLASS_%X", Rand32());
+
+	Zero(&wc, sizeof(wc));
+	wc.hbrBackground = (HBRUSH)GetStockObject(WHITE_BRUSH);
+	wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+	wc.hIcon = NULL;
+	wc.hInstance = ms->hInst;
+	wc.lpfnWndProc = MsIsLockedWindowHandlerWindowProc;
+	wc.lpszClassName = wndclass_name;
+	if (RegisterClassA(&wc) == 0)
+	{
+		NoticeThreadInit(thread);
+		return;
+	}
+
+	hWnd = CreateWindowA(wndclass_name, wndclass_name, WS_OVERLAPPEDWINDOW,
+		CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+		NULL, NULL, ms->hInst, d);
+
+	d->hWnd = hWnd;
+
+	NoticeThreadInit(thread);
+
+	if (hWnd == NULL)
+	{
+		UnregisterClassA(wndclass_name, ms->hInst);
+		return;
+	}
+
+	while (GetMessage(&msg, NULL, 0, 0))
+	{
+		TranslateMessage(&msg);
+		DispatchMessage(&msg);
+	}
+
+	DestroyWindow(hWnd);
+
+	UnregisterClassA(wndclass_name, ms->hInst);
+}
+
+// Create new IsLocked thread
+MS_ISLOCKED *MsNewIsLocked()
+{
+	MS_ISLOCKED *d;
+	THREAD *t;
+
+	SleepThread(5000);
+
+	if (IsNt() == false || ms->nt->WTSRegisterSessionNotification == NULL ||
+		ms->nt->WTSUnRegisterSessionNotification == NULL)
+	{
+		return NULL;
+	}
+
+	d = ZeroMalloc(sizeof(MS_ISLOCKED));
+
+	t = NewThread(MsIsLockedThreadProc, d);
+
+	WaitThreadInit(t);
+
+	d->Thread = t;
+
+	return d;
+}
+
+// Stop and free the IsLocked thread
+void MsFreeIsLocked(MS_ISLOCKED *d)
+{
+	if (d == NULL)
+	{
+		return;
+	}
+
+	if (d->hWnd != NULL)
+	{
+		PostMessageA(d->hWnd, WM_CLOSE, 0, 0);
+	}
+
+	WaitThread(d->Thread, INFINITE);
+	ReleaseThread(d->Thread);
+
+	Free(d);
+}
+
 // Execution of shutdown (NT)
 bool MsShutdownEx(bool reboot, bool force, UINT time_limit, char *message)
 {
@@ -12446,6 +12584,33 @@ bool MsIsNt()
 	}
 
 	return ms->IsNt;
+}
+
+// Get whether the current system is WINE
+bool MsIsWine()
+{
+	bool ret = false;
+
+	if (ms == NULL)
+	{
+		HINSTANCE h = LoadLibrary("kernel32.dll");
+
+		if (h != NULL)
+		{
+			if (GetProcAddress(h, "wine_get_unix_file_name") != NULL)
+			{
+				ret = true;
+			}
+
+			FreeLibrary(h);
+		}
+	}
+	else
+	{
+		ret = ms->IsWine;
+	}
+
+	return ret;
 }
 
 // Get whether the current user is an Admin
@@ -12648,6 +12813,12 @@ NT_API *MsLoadNtApiFunctions()
 		nt->WTSEnumerateSessionsA =
 			(BOOL (__stdcall *)(HANDLE,DWORD,DWORD,PWTS_SESSION_INFOA *,DWORD *))
 			GetProcAddress(nt->hWtsApi32, "WTSEnumerateSessionsA");
+		nt->WTSRegisterSessionNotification =
+			(BOOL (__stdcall *)(HWND,DWORD))
+			GetProcAddress(nt->hWtsApi32, "WTSRegisterSessionNotification");
+		nt->WTSUnRegisterSessionNotification =
+			(BOOL (__stdcall *)(HWND))
+			GetProcAddress(nt->hWtsApi32, "WTSUnRegisterSessionNotification");
 	}
 
 	// Service related API
@@ -14624,6 +14795,11 @@ void MsInit()
 		ms->IsAdmin = true;
 	}
 
+	if (GetProcAddress(ms->hKernel32, "wine_get_unix_file_name") != NULL)
+	{
+		ms->IsWine = true;
+	}
+
 	// Get information about the current process
 	ms->hCurrentProcess = GetCurrentProcess();
 	ms->CurrentProcessId = GetCurrentProcessId();
@@ -15313,7 +15489,3 @@ wchar_t *MsGetWinTempDirW()
 
 #endif	// WIN32
 
-
-// Developed by SoftEther VPN Project at University of Tsukuba in Japan.
-// Department of Computer Science has dozens of overly-enthusiastic geeks.
-// Join us: http://www.tsukuba.ac.jp/english/admission/

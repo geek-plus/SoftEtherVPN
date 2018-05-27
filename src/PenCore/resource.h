@@ -220,6 +220,7 @@
 #define ICO_RESEARCH                    239
 #define BMP_UNIVTSUKUBA                 240
 #define ICO_POLICE                      241
+#define ICO_LANG_TRADITIONAL_CHINESE    243
 #define S_TITLE                         1007
 #define S_INSERT_SECURE                 1008
 #define S_TITLE2                        1008
@@ -710,7 +711,7 @@
 #define S_TSUKUBA2                      1281
 #define IDC_CHECK1                      1285
 #define R_NO_SAVE_PASSWORD              1285
-#define R_PROMISCUS                     1285
+#define R_PROMISCUOUS                   1285
 #define R_NO_ENUM                       1285
 #define R_ETHERNET                      1285
 #define R_CONTROLLER_ONLY               1285
@@ -935,7 +936,7 @@
 #define R_UNESTABLISHED                 1435
 #define R_USER                          1435
 #define R_CUSTOM                        1435
-#define S_DISBLE                        1435
+#define S_DISABLE                        1435
 #define R_PERMANENT                     1435
 #define R_FOR_SYSTEM                    1436
 #define IDC_NETADDRESS1                 1437
@@ -1025,6 +1026,7 @@
 #define S_VGS3                          1514
 #define S_TSUKUBA                       1515
 #define R_DISABLE_NATT                  1516
+#define S_SMARTCARD_ICON                1517
 #define B_ONLINE                        1655
 #define D_NM_CONNECT                    1998
 #define D_NM_MAIN                       1999
@@ -1205,9 +1207,9 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NO_MFC                     1
-#define _APS_NEXT_RESOURCE_VALUE        242
+#define _APS_NEXT_RESOURCE_VALUE        244
 #define _APS_NEXT_COMMAND_VALUE         40111
-#define _APS_NEXT_CONTROL_VALUE         1517
+#define _APS_NEXT_CONTROL_VALUE         1518
 #define _APS_NEXT_SYMED_VALUE           102
 #endif
 #endif

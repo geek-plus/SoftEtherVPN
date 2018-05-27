@@ -1,17 +1,17 @@
-// SoftEther VPN Source Code
+// SoftEther VPN Source Code - Developer Edition Master Branch
 // Cedar Communication Module
 // 
 // SoftEther VPN Server, Client and Bridge are free software under GPLv2.
 // 
-// Copyright (c) 2012-2015 Daiyuu Nobori.
-// Copyright (c) 2012-2015 SoftEther VPN Project, University of Tsukuba, Japan.
-// Copyright (c) 2012-2015 SoftEther Corporation.
+// Copyright (c) Daiyuu Nobori.
+// Copyright (c) SoftEther VPN Project, University of Tsukuba, Japan.
+// Copyright (c) SoftEther Corporation.
 // 
 // All Rights Reserved.
 // 
 // http://www.softether.org/
 // 
-// Author: Daiyuu Nobori
+// Author: Daiyuu Nobori, Ph.D.
 // Comments: Tetsuo Sugiyama, Ph.D.
 // 
 // This program is free software; you can redistribute it and/or
@@ -436,7 +436,7 @@ void NnCombineIp(NATIVE_NAT *t, IP_COMBINE *c, UINT offset, void *data, UINT siz
 
 	if (last_packet)
 	{
-		// If No More Flagment packet arrives, the size of this datagram is finalized
+		// If No More Fragment packet arrives, the size of this datagram is finalized
 		c->Size = offset + size;
 	}
 
@@ -1178,7 +1178,7 @@ void NnIpSendFragmentedForInternet(NATIVE_NAT *t, UCHAR ip_protocol, UINT src_ip
 	ip->TypeOfService = DEFAULT_IP_TOS;
 	ip->TotalLength = Endian16((USHORT)(size + IP_HEADER_SIZE));
 	ip->Identification = Endian16(id);
-	ip->FlagsAndFlagmentOffset[0] = ip->FlagsAndFlagmentOffset[1] = 0;
+	ip->FlagsAndFragmentOffset[0] = ip->FlagsAndFragmentOffset[1] = 0;
 	IPV4_SET_OFFSET(ip, (offset / 8));
 	if ((offset + size) >= total_size)
 	{
@@ -1775,7 +1775,7 @@ void NnMainLoop(NATIVE_NAT *t, NATIVE_STACK *a)
 	AddInterrupt(interrupt, next_poll_tick);
 
 	tcp_last_recv_tick = Tick64();
-	next_dhcp_renew_tick = Tick64() + (UINT64)dhcp_renew_interval;
+	next_dhcp_renew_tick = Tick64() + (UINT64)dhcp_renew_interval * 1000;
 	AddInterrupt(interrupt, next_dhcp_renew_tick);
 
 	while (t->Halt == false && t->v->UseNat)
@@ -1833,7 +1833,7 @@ LABEL_RESTART:
 
 			IPCDhcpRenewIP(ipc, &ip);
 
-			next_dhcp_renew_tick = now + (UINT64)dhcp_renew_interval;
+			next_dhcp_renew_tick = now + (UINT64)dhcp_renew_interval * 1000;
 			AddInterrupt(interrupt, next_dhcp_renew_tick);
 		}
 
@@ -2250,6 +2250,7 @@ BUF *NnReadDnsRecord(BUF *buf, bool answer, USHORT *ret_type, USHORT *ret_class)
 		data = Malloc(data_len);
 		if (ReadBuf(buf, data, data_len) != data_len)
 		{
+			Free(data);
 			return false;
 		}
 
@@ -2386,7 +2387,6 @@ bool NnTestConnectivity(NATIVE_STACK *a, TUBE *halt_tube)
 	UINT64 next_send_tick = 0;
 	UINT64 giveup_time;
 	IPC *ipc;
-	UINT src_port = NnGenSrcPort(a->IsIpRawMode);
 	INTERRUPT_MANAGER *interrupt;
 	TUBE *tubes[3];
 	UINT num_tubes = 0;
@@ -2394,11 +2394,14 @@ bool NnTestConnectivity(NATIVE_STACK *a, TUBE *halt_tube)
 	IP my_priv_ip;
 	UINT num_send_dns = 0;
 	IP using_dns;
+	UINT src_port = 0;
 	// Validate arguments
 	if (a == NULL)
 	{
 		return false;
 	}
+
+	src_port = NnGenSrcPort(a->IsIpRawMode);
 
 	Copy(&using_dns, &a->DnsServerIP, sizeof(IP));
 
@@ -3997,14 +4000,16 @@ bool NatTransactIcmp(VH *v, NAT_ENTRY *n)
 	void *buf;
 	UINT recv_size;
 	BLOCK *block;
-	UINT dest_port = n->DestPort;
 	IP dest_ip;
 	UINT num_ignore_errors = 0;
+	UINT dest_port = 0;
 	// Validate arguments
 	if (v == NULL || n == NULL)
 	{
 		return true;
 	}
+
+	dest_port = n->DestPort;
 
 	if (n->DisconnectNow)
 	{
@@ -4200,14 +4205,16 @@ bool NatTransactUdp(VH *v, NAT_ENTRY *n)
 	void *buf;
 	UINT recv_size;
 	BLOCK *block;
-	UINT dest_port = n->DestPort;
 	IP dest_ip;
 	UINT num_ignore_errors;
+	UINT dest_port = 0;
 	// Validate arguments
 	if (v == NULL || n == NULL)
 	{
 		return true;
 	}
+
+	dest_port = n->DestPort;
 
 	if (n->DisconnectNow)
 	{
@@ -5429,7 +5436,7 @@ SCAN_FIRST:
 void ParseTcpOption(TCP_OPTION *o, void *data, UINT size)
 {
 	UCHAR *buf = (UCHAR *)data;
-	UINT i;
+	UINT i = 0;
 	UINT value_size = 0;
 	UINT value_id = 0;
 	UCHAR value[128];
@@ -5441,13 +5448,18 @@ void ParseTcpOption(TCP_OPTION *o, void *data, UINT size)
 
 	Zero(o, sizeof(TCP_OPTION));
 
-	for (i = 0;i < size;i++)
+	while(i < size)
 	{
 		if (buf[i] == 0)
 		{
 			return;
 		}
-		if (buf[i] != 1)
+		else if (buf[i] == 1)
+		{
+			i++;
+			continue;
+		}
+		else
 		{
 			value_id = buf[i];
 			i++;
@@ -5466,12 +5478,14 @@ void ParseTcpOption(TCP_OPTION *o, void *data, UINT size)
 				return;
 			}
 			value_size -= 2;
+                   
 			Copy(value, &buf[i], value_size);
 			i += value_size;
-			if (i >= size)
+			if (i > size)
 			{
 				return;
 			}
+
 			switch (value_id)
 			{
 			case 2:	// MSS
@@ -5486,14 +5500,13 @@ void ParseTcpOption(TCP_OPTION *o, void *data, UINT size)
 				if (value_size == 1)
 				{
 					UCHAR *wss = (UCHAR *)value;
-					o->WindowScaling = Endian16(*wss);
+					o->WindowScaling = *wss;
 				}
 				break;
 
 			}
 		}
 	}
-
 }
 
 // Create a new NAT TCP session
@@ -6943,104 +6956,6 @@ NAT_ENTRY *CreateNatDns(VH *v, UINT src_ip, UINT src_port, UINT dest_ip, UINT de
 	return n;
 }
 
-// Get the next byte
-UCHAR GetNextByte(BUF *b)
-{
-	UCHAR c = 0;
-	// Validate arguments
-	if (b == NULL)
-	{
-		return 0;
-	}
-
-	if (ReadBuf(b, &c, 1) != 1)
-	{
-		return 0;
-	}
-
-	return c;
-}
-
-// Interpret the DNS query
-bool ParseDnsQuery(char *name, UINT name_size, void *data, UINT data_size)
-{
-	BUF *b;
-	char tmp[257];
-	bool ok = true;
-	USHORT val;
-	// Validate arguments
-	if (name == NULL || data == NULL || data_size == 0)
-	{
-		return false;
-	}
-	StrCpy(name, name_size, "");
-
-	b = NewBuf();
-	WriteBuf(b, data, data_size);
-	SeekBuf(b, 0, 0);
-
-	while (true)
-	{
-		UINT next_len = (UINT)GetNextByte(b);
-		if (next_len > 0)
-		{
-			// Read only the specified length
-			Zero(tmp, sizeof(tmp));
-			if (ReadBuf(b, tmp, next_len) != next_len)
-			{
-				ok = false;
-				break;
-			}
-			// Append
-			if (StrLen(name) != 0)
-			{
-				StrCat(name, name_size, ".");
-			}
-			StrCat(name, name_size, tmp);
-		}
-		else
-		{
-			// Read all
-			break;
-		}
-	}
-
-	if (ReadBuf(b, &val, sizeof(val)) != sizeof(val))
-	{
-		ok = false;
-	}
-	else
-	{
-		if (Endian16(val) != 0x01 && Endian16(val) != 0x0c)
-		{
-			ok = false;
-		}
-	}
-
-	if (ReadBuf(b, &val, sizeof(val)) != sizeof(val))
-	{
-		ok = false;
-	}
-	else
-	{
-		if (Endian16(val) != 0x01)
-		{
-			ok = false;
-		}
-	}
-
-	FreeBuf(b);
-
-	if (ok == false || StrLen(name) == 0)
-	{
-		return false;
-	}
-	else
-	{
-		return true;
-	}
-}
-
 // Set the VGS host name
 void SetDnsProxyVgsHostname(char *hostname)
 {
@@ -7722,7 +7637,7 @@ void CombineIp(VH *v, IP_COMBINE *c, UINT offset, void *data, UINT size, bool la
 
 	if (last_packet)
 	{
-		// If No More Flagment packet arrives, the size of this datagram is finalized
+		// If No More Fragment packet arrives, the size of this datagram is finalized
 		c->Size = offset + size;
 	}
 
@@ -8932,7 +8847,7 @@ void SendFragmentedIp(VH *v, UINT dest_ip, UINT src_ip, USHORT id, USHORT total_
 	ip->TypeOfService = DEFAULT_IP_TOS;
 	ip->TotalLength = Endian16((USHORT)(size + IP_HEADER_SIZE));
 	ip->Identification = Endian16(id);
-	ip->FlagsAndFlagmentOffset[0] = ip->FlagsAndFlagmentOffset[1] = 0;
+	ip->FlagsAndFragmentOffset[0] = ip->FlagsAndFragmentOffset[1] = 0;
 	IPV4_SET_OFFSET(ip, (offset / 8));
 	if ((offset + size) >= total_size)
 	{
@@ -10391,12 +10306,12 @@ void GenMacAddress(UCHAR *mac)
 	Hash(hash, b->Buf, b->Size, true);
 
 	// Generate a MAC address
-	mac[0] = 0x00;
-	mac[1] = 0xAC;		// AC hurray
-	mac[2] = hash[0];
-	mac[3] = hash[1];
-	mac[4] = hash[2];
-	mac[5] = hash[3];
+	mac[0] = 0x5E;
+	mac[1] = hash[0];
+	mac[2] = hash[1];
+	mac[3] = hash[2];
+	mac[4] = hash[3];
+	mac[5] = hash[4];
 
 	FreeBuf(b);
 }
@@ -10409,7 +10324,3 @@ PACKET_ADAPTER *VirtualGetPacketAdapter()
 }
 
 
-
-// Developed by SoftEther VPN Project at University of Tsukuba in Japan.
-// Department of Computer Science has dozens of overly-enthusiastic geeks.
-// Join us: http://www.tsukuba.ac.jp/english/admission/

@@ -1,11 +1,11 @@
-// SoftEther VPN Source Code
+// SoftEther VPN Source Code - Developer Edition Master Branch
 // Mayaqua Kernel
 // 
 // SoftEther VPN Server, Client and Bridge are free software under GPLv2.
 // 
-// Copyright (c) 2012-2015 Daiyuu Nobori.
-// Copyright (c) 2012-2015 SoftEther VPN Project, University of Tsukuba, Japan.
-// Copyright (c) 2012-2015 SoftEther Corporation.
+// Copyright (c) Daiyuu Nobori.
+// Copyright (c) SoftEther VPN Project, University of Tsukuba, Japan.
+// Copyright (c) SoftEther Corporation.
 // 
 // All Rights Reserved.
 // 
@@ -1010,6 +1010,63 @@ void UnixRestorePriority()
 	}
 }
 
+UINT UnixGetNumberOfCpuInner()
+{
+	BUF *b;
+	UINT ret = 0;
+
+	b = ReadDump("/proc/cpuinfo");
+	if (b != NULL)
+	{
+		while (true)
+		{
+			char *line = CfgReadNextLine(b);
+
+			if (line == NULL)
+			{
+				break;
+			}
+
+			if (IsEmptyStr(line) == false)
+			{
+				TOKEN_LIST *t = ParseToken(line, ":");
+				if (t != NULL)
+				{
+					if (t->NumTokens >= 2)
+					{
+						char *key = t->Token[0];
+						char *value = t->Token[1];
+
+						Trim(key);
+						Trim(value);
+
+						if (StrCmpi(key, "processor") == 0)
+						{
+							if (IsNum(value))
+							{
+								UINT i = ToInt(value) + 1;
+
+								if (i >= 1 && i <= 128)
+								{
+									ret = MAX(ret, i);
+								}
+							}
+						}
+					}
+
+					FreeToken(t);
+				}
+			}
+
+			Free(line);
+		}
+
+		FreeBuf(b);
+	}
+
+	return ret;
+}
+
 // Get the product ID
 char *UnixGetProductId()
 {
@@ -1162,7 +1219,9 @@ bool UnixRunW(wchar_t *filename, wchar_t *arg, bool hide, bool wait)
 bool UnixRun(char *filename, char *arg, bool hide, bool wait)
 {
 	TOKEN_LIST *t;
+	char **args;
 	UINT ret;
+
 	// Validate arguments
 	if (filename == NULL)
 	{
@@ -1173,6 +1232,25 @@ bool UnixRun(char *filename, char *arg, bool hide, bool wait)
 		arg = "";
 	}
 
+	Print("", filename, arg);
+	t = ParseToken(arg, " ");
+	if (t == NULL)
+	{
+		return false;
+	}
+	else
+	{
+		UINT num_args;
+		UINT i;
+		num_args = t->NumTokens + 2;
+		args = ZeroMalloc(sizeof(char *) * num_args);
+		args[0] = filename;
+		for (i = 1;i < num_args - 1;i++)
+		{
+			args[i] = t->Token[i - 1];
+		}
+	}
+	
 	// Create a child process
 	ret = fork();
 	if (ret == -1)
@@ -1183,39 +1261,21 @@ bool UnixRun(char *filename, char *arg, bool hide, bool wait)
 
 	if (ret == 0)
 	{
-		Print("", filename, arg);
 		// Child process
 		if (hide)
 		{
 			// Close the standard I/O
 			UnixCloseIO();
 		}
-
-		t = ParseToken(arg, " ");
-		if (t == NULL)
-		{
-			AbortExit();
-		}
-		else
-		{
-			char **args;
-			UINT num_args;
-			UINT i;
-			num_args = t->NumTokens + 2;
-			args = ZeroMalloc(sizeof(char *) * num_args);
-			args[0] = filename;
-			for (i = 1;i < num_args - 1;i++)
-			{
-				args[i] = t->Token[i - 1];
-			}
-			execvp(filename, args);
-			AbortExit();
-		}
+		execvp(filename, args);
+		AbortExit();
 	}
 	else
 	{
 		// Parent process
 		pid_t pid = (pid_t)ret;
+		Free(args);
+		FreeToken(t);
 
 		if (wait)
 		{
@@ -2031,6 +2091,7 @@ void UnixInc32(UINT *value)
 void UnixGetSystemTime(SYSTEMTIME *system_time)
 {
 	time_t now = 0;
+	time_64t now2 = 0;
 	struct tm tm;
 	struct timeval tv;
 	struct timezone tz;
@@ -2048,7 +2109,16 @@ void UnixGetSystemTime(SYSTEMTIME *system_time)
 
 	time(&now);
 
-	gmtime_r(&now, &tm);
+	if (sizeof(time_t) == 4)
+	{
+		now2 = (time_64t)((UINT64)((UINT32)now));
+	}
+	else
+	{
+		now2 = now;
+	}
+
+	c_gmtime_r(&now2, &tm);
 
 	TmToSystem(system_time, &tm);
 
@@ -2087,7 +2157,7 @@ UINT64 UnixGetTick64()
 #endif	// CLOCK_MONOTONIC
 #endif	// CLOCK_HIGHRES
 
-	ret = (UINT64)t.tv_sec * 1000LL + (UINT64)t.tv_nsec / 1000000LL;
+	ret = ((UINT64)((UINT32)t.tv_sec)) * 1000LL + (UINT64)t.tv_nsec / 1000000LL;
 
 	if (akirame == false && ret == 0)
 	{
@@ -2106,7 +2176,7 @@ UINT64 UnixGetTick64()
 		host_get_clock_service(mach_host_self(), SYSTEM_CLOCK, &clock_serv);
 	}
 	clock_get_time(clock_serv, &t);
-	ret = (UINT64)t.tv_sec * 1000LL + (UINT64)t.tv_nsec / 1000000LL;
+	ret = ((UINT64)((UINT32)t.tv_sec)) * 1000LL + (UINT64)t.tv_nsec / 1000000LL;
 	return ret;
 #else
 	return TickRealtimeManual();
@@ -2849,7 +2919,3 @@ void UnixServiceMain(int argc, char *argv[], char *name, SERVICE_FUNCTION *start
 }
 
 #endif	// UNIX
-
-// Developed by SoftEther VPN Project at University of Tsukuba in Japan.
-// Department of Computer Science has dozens of overly-enthusiastic geeks.
-// Join us: http://www.tsukuba.ac.jp/english/admission/

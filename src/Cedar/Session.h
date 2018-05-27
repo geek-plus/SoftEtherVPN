@@ -1,17 +1,17 @@
-// SoftEther VPN Source Code
+// SoftEther VPN Source Code - Developer Edition Master Branch
 // Cedar Communication Module
 // 
 // SoftEther VPN Server, Client and Bridge are free software under GPLv2.
 // 
-// Copyright (c) 2012-2015 Daiyuu Nobori.
-// Copyright (c) 2012-2015 SoftEther VPN Project, University of Tsukuba, Japan.
-// Copyright (c) 2012-2015 SoftEther Corporation.
+// Copyright (c) Daiyuu Nobori.
+// Copyright (c) SoftEther VPN Project, University of Tsukuba, Japan.
+// Copyright (c) SoftEther Corporation.
 // 
 // All Rights Reserved.
 // 
 // http://www.softether.org/
 // 
-// Author: Daiyuu Nobori
+// Author: Daiyuu Nobori, Ph.D.
 // Comments: Tetsuo Sugiyama, Ph.D.
 // 
 // This program is free software; you can redistribute it and/or
@@ -234,6 +234,8 @@ struct SESSION
 	UCHAR IpcMacAddress[6];			// MAC address for IPC
 	UCHAR Padding[2];
 
+	IP ServerIP_CacheForNextConnect;	// Server IP, cached for next connect
+
 	UINT64 CreatedTime;				// Creation date and time
 	UINT64 LastCommTime;			// Last communication date and time
 	UINT64 LastCommTimeForDormant;	// Last communication date and time (for dormant)
@@ -263,9 +265,9 @@ struct SESSION
 	UINT NumDisconnected;			// Number of socket disconnection
 	bool NoReconnectToSession;		// Disable to reconnect to the session
 	char UnderlayProtocol[64];		// Physical communication protocol
-	UINT64 FirstConnectionEstablisiedTime;	// Connection completion time of the first connection
+	UINT64 FirstConnectionEstablishedTime;	// Connection completion time of the first connection
 	UINT64 CurrentConnectionEstablishTime;	// Completion time of this connection
-	UINT NumConnectionsEatablished;	// Number of connections established so far
+	UINT NumConnectionsEstablished;	// Number of connections established so far
 	UINT AdjustMss;					// MSS adjustment value
 	bool IsVPNClientAndVLAN_Win32;	// Is the VPN Client session with a VLAN card (Win32)
 
@@ -307,7 +309,7 @@ struct SESSION
 	LIST *DelayedPacketList;		// Delayed packet list
 	UINT Flag1;
 
-	USER *NumLoginIncrementUserObject;	// User objects to increment the nymber of logins
+	USER *NumLoginIncrementUserObject;	// User objects to increment the number of logins
 	HUB *NumLoginIncrementHubObject;	// Virtual HUB object to increment the number of logins
 	UINT64 NumLoginIncrementTick;		// Time to perform increment a number of log
 
@@ -315,7 +317,7 @@ struct SESSION
 	char FirstTimeHttpRedirectUrl[128];	// URL for redirection only the first time
 	UINT FirstTimeHttpAccessCheckIp;	// IP address for access checking
 
-	// To examine the maximum number of alowed logging target packets per minute
+	// To examine the maximum number of allowed logging target packets per minute
 	UINT64 MaxLoggedPacketsPerMinuteStartTick;	// Inspection start time
 	UINT CurrentNumPackets;				// Current number of packets
 
@@ -441,7 +443,3 @@ UINT GetNextDelayedPacketTickDiff(SESSION *s);
 
 
 
-
-// Developed by SoftEther VPN Project at University of Tsukuba in Japan.
-// Department of Computer Science has dozens of overly-enthusiastic geeks.
-// Join us: http://www.tsukuba.ac.jp/english/admission/

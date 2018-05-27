@@ -1,17 +1,17 @@
-// SoftEther VPN Source Code
+// SoftEther VPN Source Code - Developer Edition Master Branch
 // Cedar Communication Module
 // 
 // SoftEther VPN Server, Client and Bridge are free software under GPLv2.
 // 
-// Copyright (c) 2012-2015 Daiyuu Nobori.
-// Copyright (c) 2012-2015 SoftEther VPN Project, University of Tsukuba, Japan.
-// Copyright (c) 2012-2015 SoftEther Corporation.
+// Copyright (c) Daiyuu Nobori.
+// Copyright (c) SoftEther VPN Project, University of Tsukuba, Japan.
+// Copyright (c) SoftEther Corporation.
 // 
 // All Rights Reserved.
 // 
 // http://www.softether.org/
 // 
-// Author: Daiyuu Nobori
+// Author: Daiyuu Nobori, Ph.D.
 // Comments: Tetsuo Sugiyama, Ph.D.
 // 
 // This program is free software; you can redistribute it and/or
@@ -323,7 +323,7 @@ IPC *NewIPCByParam(CEDAR *cedar, IPC_PARAM *param, UINT *error_code)
 		param->UserName, param->Password, error_code, &param->ClientIp,
 		param->ClientPort, &param->ServerIp, param->ServerPort,
 		param->ClientHostname, param->CryptName,
-		param->BridgeMode, param->Mss, NULL);
+		param->BridgeMode, param->Mss, NULL, param->ClientCertificate);
 
 	return ipc;
 }
@@ -332,7 +332,7 @@ IPC *NewIPCByParam(CEDAR *cedar, IPC_PARAM *param, UINT *error_code)
 IPC *NewIPC(CEDAR *cedar, char *client_name, char *postfix, char *hubname, char *username, char *password,
 			UINT *error_code, IP *client_ip, UINT client_port, IP *server_ip, UINT server_port,
 			char *client_hostname, char *crypt_name,
-			bool bridge_mode, UINT mss, EAP_CLIENT *eap_client)
+			bool bridge_mode, UINT mss, EAP_CLIENT *eap_client, X *client_certificate)
 {
 	IPC *ipc;
 	UINT dummy_int = 0;
@@ -425,8 +425,14 @@ IPC *NewIPC(CEDAR *cedar, char *client_name, char *postfix, char *hubname, char 
 	FreePack(p);
 
 	// Upload the authentication data
-	p = PackLoginWithPlainPassword(hubname, username, password);
-	PackAddInt64(p, "timestamp", SystemTime64());
+	if (client_certificate != NULL)
+	{
+		p = PackLoginWithOpenVPNCertificate(hubname, username, client_certificate);
+	}
+	else
+	{
+		p = PackLoginWithPlainPassword(hubname, username, password);
+	}
 	PackAddStr(p, "hello", client_name);
 	PackAddInt(p, "client_ver", cedar->Version);
 	PackAddInt(p, "client_build", cedar->Build);
@@ -555,7 +561,7 @@ IPC *NewIPC(CEDAR *cedar, char *client_name, char *postfix, char *hubname, char 
 	ipc->ArpTable = NewList(IPCCmpArpTable);
 
 	// Create an IPv4 reception queue
-	ipc->IPv4RecviedQueue = NewQueue();
+	ipc->IPv4ReceivedQueue = NewQueue();
 
 	return ipc;
 
@@ -595,7 +601,7 @@ IPC *NewIPCBySock(CEDAR *cedar, SOCK *s, void *mac_address)
 	ipc->ArpTable = NewList(IPCCmpArpTable);
 
 	// Create an IPv4 reception queue
-	ipc->IPv4RecviedQueue = NewQueue();
+	ipc->IPv4ReceivedQueue = NewQueue();
 
 	ipc->FlushList = NewTubeFlushList();
 
@@ -665,7 +671,7 @@ void FreeIPC(IPC *ipc)
 
 	while (true)
 	{
-		BLOCK *b = GetNext(ipc->IPv4RecviedQueue);
+		BLOCK *b = GetNext(ipc->IPv4ReceivedQueue);
 		if (b == NULL)
 		{
 			break;
@@ -674,9 +680,27 @@ void FreeIPC(IPC *ipc)
 		FreeBlock(b);
 	}
 
-	ReleaseQueue(ipc->IPv4RecviedQueue);
+	ReleaseQueue(ipc->IPv4ReceivedQueue);
 
 	Free(ipc);
+}
+
+// Set User Class option if corresponding Virtual Hub optin is set
+void IPCDhcpSetConditionalUserClass(IPC *ipc, DHCP_OPTION_LIST *req)
+{
+	HUB *hub;
+
+	hub = GetHub(ipc->Cedar, ipc->HubName);
+	if (hub == NULL)
+	{
+		return;
+	}
+
+	if (hub->Option && hub->Option->UseHubNameAsDhcpUserClassOption)
+	{
+		StrCpy(req->UserClass, sizeof(req->UserClass), ipc->HubName);
+	}
+	ReleaseHub(hub);
 }
 
 // Release the IP address from the DHCP server
@@ -693,6 +717,7 @@ void IPCDhcpFreeIP(IPC *ipc, IP *dhcp_server)
 	Zero(&req, sizeof(req));
 	req.Opcode = DHCP_RELEASE;
 	req.ServerAddress = IPToUINT(dhcp_server);
+	IPCDhcpSetConditionalUserClass(ipc, &req);
 
 	FreeDHCPv4Data(IPCSendDhcpRequest(ipc, NULL, tran_id, &req, 0, 0, NULL));
 }
@@ -713,6 +738,7 @@ void IPCDhcpRenewIP(IPC *ipc, IP *dhcp_server)
 	req.Opcode = DHCP_REQUEST;
 	StrCpy(req.Hostname, sizeof(req.Hostname), ipc->ClientHostname);
 	req.RequestedIp = IPToUINT(&ipc->ClientIPAddress);
+	IPCDhcpSetConditionalUserClass(ipc, &req);
 
 	FreeDHCPv4Data(IPCSendDhcpRequest(ipc, dhcp_server, tran_id, &req, 0, 0, NULL));
 }
@@ -735,6 +761,7 @@ bool IPCDhcpRequestInformIP(IPC *ipc, DHCP_OPTION_LIST *opt, TUBE *discon_poll_t
 	req.Opcode = DHCP_INFORM;
 	req.ClientAddress = IPToUINT(client_ip);
 	StrCpy(req.Hostname, sizeof(req.Hostname), ipc->ClientHostname);
+	IPCDhcpSetConditionalUserClass(ipc, &req);
 
 	d = IPCSendDhcpRequest(ipc, NULL, tran_id, &req, DHCP_ACK, IPC_DHCP_TIMEOUT, discon_poll_tube);
 	if (d == NULL)
@@ -799,6 +826,7 @@ LABEL_RETRY_FOR_OPENVPN:
 	req.RequestedIp = request_ip;
 	req.Opcode = DHCP_DISCOVER;
 	StrCpy(req.Hostname, sizeof(req.Hostname), ipc->ClientHostname);
+	IPCDhcpSetConditionalUserClass(ipc, &req);
 
 	d = IPCSendDhcpRequest(ipc, NULL, tran_id, &req, DHCP_OFFER, IPC_DHCP_TIMEOUT, discon_poll_tube);
 	if (d == NULL)
@@ -844,7 +872,7 @@ LABEL_RETRY_FOR_OPENVPN:
 			char tmp[64];
 
 			DHCP_OPTION_LIST req;
-			IPC_DHCP_RELESAE_QUEUE *q;
+			IPC_DHCP_RELEASE_QUEUE *q;
 
 			// If the offered IP address is not used, place the address
 			// in release memo list to release at the end of this function
@@ -852,7 +880,7 @@ LABEL_RETRY_FOR_OPENVPN:
 			req.Opcode = DHCP_RELEASE;
 			req.ServerAddress = d->ParsedOptionList->ServerAddress;
 
-			q = ZeroMalloc(sizeof(IPC_DHCP_RELESAE_QUEUE));
+			q = ZeroMalloc(sizeof(IPC_DHCP_RELEASE_QUEUE));
 			Copy(&q->Req, &req, sizeof(DHCP_OPTION_LIST));
 			q->TranId = tran_id;
 			Copy(q->MacAddress, ipc->MacAddress, 6);
@@ -909,6 +937,7 @@ LABEL_RETRY_FOR_OPENVPN:
 	StrCpy(req.Hostname, sizeof(req.Hostname), ipc->ClientHostname);
 	req.ServerAddress = d->ParsedOptionList->ServerAddress;
 	req.RequestedIp = d->ParsedOptionList->ClientAddress;
+	IPCDhcpSetConditionalUserClass(ipc, &req);
 
 	d2 = IPCSendDhcpRequest(ipc, NULL, tran_id, &req, DHCP_ACK, IPC_DHCP_TIMEOUT, discon_poll_tube);
 	if (d2 == NULL)
@@ -965,7 +994,7 @@ LABEL_CLEANUP:
 
 		for (i = 0;i < LIST_NUM(release_list);i++)
 		{
-			IPC_DHCP_RELESAE_QUEUE *q = LIST_DATA(release_list, i);
+			IPC_DHCP_RELEASE_QUEUE *q = LIST_DATA(release_list, i);
 
 			Copy(ipc->MacAddress, q->MacAddress, 6);
 			FreeDHCPv4Data(IPCSendDhcpRequest(ipc, NULL, q->TranId, &q->Req, 0, 0, NULL));
@@ -1243,6 +1272,12 @@ BUF *IPCBuildDhcpRequestOptions(IPC *ipc, DHCP_OPTION_LIST *opt)
 		Add(o, NewDhcpOption(DHCP_ID_HOST_NAME, opt->Hostname, StrLen(opt->Hostname)));
 	}
 
+	// User Class
+	if (IsEmptyStr(opt->UserClass) == false)
+	{
+		Add(o, NewDhcpOption(DHCP_ID_USER_CLASS, opt->UserClass, StrLen(opt->UserClass)));
+	}
+
 	// Vendor
 	Add(o, NewDhcpOption(DHCP_ID_VENDOR_ID, IPC_DHCP_VENDOR_ID, StrLen(IPC_DHCP_VENDOR_ID)));
 
@@ -1421,7 +1456,7 @@ void IPCAssociateOnArpTable(IPC *ipc, IP *ip, UCHAR *mac_address)
 	}
 }
 
-// Identifiy whether the MAC address is a normal unicast address
+// Identify whether the MAC address is a normal unicast address
 bool IsValidUnicastMacAddress(UCHAR *mac)
 {
 	// Validate arguments
@@ -1591,7 +1626,7 @@ void IPCProcessL3EventsEx(IPC *ipc, UINT64 now)
 								IPCAssociateOnArpTable(ipc, &ip_src, src_mac);
 
 								// Place in the reception queue
-								InsertQueue(ipc->IPv4RecviedQueue, NewBlock(data, size, 0));
+								InsertQueue(ipc->IPv4ReceivedQueue, NewBlock(data, size, 0));
 							}
 							else
 							{
@@ -2051,7 +2086,7 @@ BLOCK *IPCRecvIPv4(IPC *ipc)
 		return NULL;
 	}
 
-	b = GetNext(ipc->IPv4RecviedQueue);
+	b = GetNext(ipc->IPv4ReceivedQueue);
 
 	return b;
 }
@@ -2089,7 +2124,3 @@ BLOCK *IPCRecvL2(IPC *ipc)
 
 
 
-
-// Developed by SoftEther VPN Project at University of Tsukuba in Japan.
-// Department of Computer Science has dozens of overly-enthusiastic geeks.
-// Join us: http://www.tsukuba.ac.jp/english/admission/
